@@ -1,0 +1,8 @@
+# Default ignored files
+/../../validator /.idea/shelf/
+/../../validator /.idea/workspace.xml
+# Editor-based HTTP Client requests
+/../../validator /.idea/httpRequests/
+# Datasource local storage ignored files
+/../../validator /.idea/dataSources/
+/../../validator /.idea/dataSources.local.xml

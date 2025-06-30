@@ -1,9 +1,13 @@
 # 数据集校验报告
 
+
+## 性能信息
+- 使用并行线程数: 8
+- 校验总耗时: 5.83 秒
 ## 检测到的结构目录
 
 -  发现含有关键词 `train` 的目录：D:\python coding\validator\imagenette2\train
--  发现含有关键词 `val` 的目录：D:\python coding\validator\imagenette2\val
+-  发现含有关键词 `val/validation/test (已优先选择 test)` 的目录：D:\python coding\validator\imagenette2\test
 
 ## 损坏图片检查
 

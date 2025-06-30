@@ -1,35 +1,74 @@
 import os
 from PIL import Image, UnidentifiedImageError
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import argparse
+import time
 
 # 项目路径和数据集路径
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(PROJECT_DIR, "imagenette2")
+# imagenette2
 REPORT_FILE = os.path.join(DATASET_DIR, "validation_report.md")
 
 def find_valid_structure_dirs(root_dir):
     found_dirs = []
-    valid_keywords = ["train", "val", "validation", "test"]
 
-    for keyword in valid_keywords:
-        for item in os.listdir(root_dir):
-            if keyword in item.lower():
-                path = os.path.join(root_dir, item)
-                if os.path.isdir(path):
-                    found_dirs.append((keyword, path))
+    train_dir = None
+    val_test_candidates = []
+
+    for item in os.listdir(root_dir):
+        lower_item = item.lower()
+        path = os.path.join(root_dir, item)
+        if os.path.isdir(path):
+            if "train" in lower_item:
+                train_dir = ("train", path)
+            elif "val" in lower_item or "validation" in lower_item or "test" in lower_item:
+                val_test_candidates.append((lower_item, path))
+
+    if train_dir:
+        found_dirs.append(train_dir)
+    else:
+        print("缺少 train 目录")
+        found_dirs.append(("train", "缺失"))
+
+    if val_test_candidates:
+        # 按字母顺序选取第一个
+        val_test_candidates.sort()
+        selected = val_test_candidates[0]
+        selected_name = os.path.basename(selected[1])
+        # 在返回的 keyword 中直接加注优先选择信息
+        found_dirs.append((f"val/validation/test (已优先选择 {selected_name})", selected[1]))
+        # print(found_dirs)
+    else:
+        print("缺少 val/validation/test 目录")
+        found_dirs.append(("val/validation/test", "缺失"))
+
     return found_dirs
 
-def check_images(root_dir):
-    corrupt_files = []
+
+def is_image_corrupt(file_path):
+    try:
+        with Image.open(file_path) as img:
+            img.verify()
+        return None
+    except (UnidentifiedImageError, IOError, SyntaxError):
+        return file_path
+
+def check_images(root_dir, max_workers=8):
+    image_files = []
     for dirpath, _, filenames in os.walk(root_dir):
         for f in filenames:
             if f.lower().endswith(('.png', '.jpg', '.jpeg')):
-                file_path = os.path.join(dirpath, f)
-                try:
-                    with Image.open(file_path) as img:
-                        img.verify()
-                except (UnidentifiedImageError, IOError, SyntaxError):
-                    corrupt_files.append(file_path)
+                image_files.append(os.path.join(dirpath, f))
+
+    corrupt_files = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_file = {executor.submit(is_image_corrupt, file_path): file_path for file_path in image_files}
+        for future in as_completed(future_to_file):
+            result = future.result()
+            if result:
+                corrupt_files.append(result)
     return corrupt_files
 
 def analyze_balance(train_path, corrupt_files):
@@ -50,9 +89,14 @@ def analyze_balance(train_path, corrupt_files):
                         corrupt_counts[class_name] += 1
     return class_counts, corrupt_counts
 
-def generate_report(found_dirs, corrupt_files, class_counts, corrupt_counts):
+def generate_report(found_dirs, corrupt_files, class_counts, corrupt_counts, elapsed_time, workers):
+
     lines = []
     lines.append("# 数据集校验报告\n")
+
+    lines.append(f"\n## 性能信息")
+    lines.append(f"- 使用并行线程数: {workers}")
+    lines.append(f"- 校验总耗时: {elapsed_time:.2f} 秒")
 
     lines.append("## 检测到的结构目录\n")
     if found_dirs:
@@ -87,11 +131,21 @@ def generate_report(found_dirs, corrupt_files, class_counts, corrupt_counts):
     print("\n".join(lines))
     print(f"\n报告已生成：{REPORT_FILE}")
 
-def main():
-    print(f"正在校验数据集路径：{DATASET_DIR}")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Validate image dataset structure and integrity.")
+    parser.add_argument("--workers", type=int, default=8, help="Number of worker threads for parallel image checking.")
+    return parser.parse_args()
 
+def main():
     found_dirs = find_valid_structure_dirs(DATASET_DIR)
-    corrupt_files = check_images(DATASET_DIR)
+    start_time = time.time()
+    # corrupt_files = check_images(DATASET_DIR)
+
+    args = parse_args()
+    corrupt_files = check_images(DATASET_DIR, max_workers=args.workers)
+
+    print(f"正在校验数据集路径：{DATASET_DIR}")
+    print(f"使用并行线程数: {args.workers}")
 
     train_dir = None
     for keyword, path in found_dirs:
@@ -101,7 +155,12 @@ def main():
 
     class_counts, corrupt_counts = analyze_balance(train_dir, corrupt_files) if train_dir else ({}, {})
 
-    generate_report(found_dirs, corrupt_files, class_counts, corrupt_counts)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+
+    generate_report(found_dirs, corrupt_files, class_counts,
+                     corrupt_counts,  elapsed_time, args.workers)
 
 if __name__ == "__main__":
     main()
+    print()
